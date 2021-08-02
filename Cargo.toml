@@ -1,0 +1,32 @@
+[package]
+edition = "2018"
+name = "sqs_listener"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# async
+async-trait = "0.1"
+tokio = {version = "1.8", features = ["rt-multi-thread", "sync"]}
+
+# actor framework
+act-zero = {version = "0.4", features = ["default-tokio"]}
+
+# error handling
+eyre = "0.6"
+thiserror = "1.0"
+
+# serde
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+
+# logging
+log = {version = "0.4", features = ["serde"]}
+
+# utils
+derive_builder = "0.10"
+
+# aws sqs
+rusoto_core = "0.47.0"
+rusoto_sqs = "0.47.0"
