@@ -12,7 +12,7 @@ Available on crates: [crates.io/sqs_listener](https://crates.io/crates/sqs_liste
 Documentation available at: [docs.rs/sqs_listener](https://docs.rs/sqs_listener/)
 
 ```toml
-sqs_listener = "0.1.0"
+sqs_listener = "0.2.0"
 ```
 
 ### Simple Example
