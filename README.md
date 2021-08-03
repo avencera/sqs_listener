@@ -3,7 +3,7 @@
 ![Build Status](https://github.com/avencera/sqs_listener/workflows/Rust/badge.svg)
 [![Crates.io](https://img.shields.io/crates/v/sqs_listener.svg)](https://crates.io/crates/sqs_listener)
 [![Documentation](https://docs.rs/sqs_listener/badge.svg)](https://docs.rs/sqs_listener)
-[![Rust 1.47+](https://img.shields.io/badge/rust-1.47+-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.52+](https://img.shields.io/badge/rust-1.52+-orange.svg)](https://www.rust-lang.org)
 
 ## Getting Started
 
