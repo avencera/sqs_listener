@@ -1,10 +1,78 @@
-mod client;
+/*!
+
+### Simple Example
+
+Simple example: [examples/simple.rs](https://github.com/avencera/sqs_listener/blob/master/examples/simple.rs)
+
+```rust
+use sqs_listener::{Region, SQSListener, SQSListenerClientBuilder};
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    env_logger::init();
+    color_eyre::install()?;
+
+    let listener = SQSListener::new("".to_string(), |message| {
+        println!("Message received {:#?}", message)
+    });
+
+    let client = SQSListenerClientBuilder::new(Region::UsEast1)
+        .listener(listener)
+        .build()?;
+
+    let _ = client.start().await;
+
+    Ok(())
+}
+```
+
+### Start a listener using AWS creds
+
+Example with creds: [examples/with_creds.rs](https://github.com/avencera/sqs_listener/blob/master/examples/with_creds.rs)
+
+```rust
+use std::env;
+
+use sqs_listener::{
+    credential::StaticProvider, request::HttpClient, Region, SQSListener, SQSListenerClientBuilder,
+};
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    env_logger::init();
+    color_eyre::install()?;
+
+    let aws_access_key_id =
+        env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID env variable needs to be present");
+
+    let aws_secret_access_key = env::var("AWS_SECRET_ACCESS_KEY")
+        .expect("AWS_SECRET_ACCESS_KEY env variable needs to be present");
+
+    let listener = SQSListener::new("".to_string(), |message| {
+        println!("Message received {:#?}", message)
+    });
+
+    let client = SQSListenerClientBuilder::new_with(
+        HttpClient::new().expect("failed to create request dispatcher"),
+        StaticProvider::new_minimal(aws_access_key_id, aws_secret_access_key),
+        Region::UsEast1,
+    )
+    .listener(listener)
+    .build()?;
+
+    let _ = client.start().await;
+
+    Ok(())
+}
+```
+*/
+pub mod client;
 
 use act_zero::runtimes::tokio::spawn_actor;
 use act_zero::*;
 use derive_builder::Builder;
-use rusoto_core::RusotoError;
-use rusoto_sqs::{DeleteMessageError, ReceiveMessageError};
+use rusoto_core::{DispatchSignedRequest, RusotoError};
+use rusoto_sqs::{DeleteMessageError, ReceiveMessageError, SqsClient};
 use std::time::Duration;
 
 pub use rusoto_core::{
@@ -14,9 +82,22 @@ pub use rusoto_core::{
 };
 pub use rusoto_sqs::Message;
 
+/// Used to build a new [SQSListenerClient]
 pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
+
+/// Error type of building an [SQSListenerClient] from its [Builder](SQSListenerClientBuilder) fails
+///
+/// ```rust
+/// #[non_exhaustive]
+/// pub enum SQSListenerClientBuilderError {
+///     UninitializedField(&'static str),
+///     ValidationError(String),
+/// }
+/// ```
+
 pub type SQSListenerClientBuilderError = client::SQSListenerClientBuilderError;
 
+/// Error type for sqs_listener
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("unable to receive messages: {0}")]
@@ -35,11 +116,35 @@ pub enum Error {
     UnknownReceiveMessages,
 }
 
+/// Create a new Builder
 impl<F: Fn(&Message) + Send + Sync> SQSListenerClientBuilder<F> {
+    /// Create a new listener the default AWS client and queue_url
+    pub fn new(region: Region) -> Self {
+        Self::new_with_client(SqsClient::new(region))
+    }
+
+    /// Create a new listener with custom credentials, request dispatcher, region and queue_url
+    pub fn new_with<P, D>(request_dispatcher: D, credentials_provider: P, region: Region) -> Self
+    where
+        P: credential::ProvideAwsCredentials + Send + Sync + 'static,
+        D: DispatchSignedRequest + Send + Sync + 'static,
+    {
+        Self::new_with_client(SqsClient::new_with(
+            request_dispatcher,
+            credentials_provider,
+            region,
+        ))
+    }
+
+    /// Create new listener with a client and queue_url
+    pub fn new_with_client(client: SqsClient) -> Self {
+        client::SQSListenerClientBuilder::priv_new_with_client(client)
+    }
+
     pub fn build(
         self: SQSListenerClientBuilder<F>,
     ) -> Result<SQSListenerClient<F>, SQSListenerClientBuilderError> {
-        let inner: client::SQSListenerClient<F> = self.build_private()?;
+        let inner: client::SQSListenerClient<F> = self.priv_build()?;
 
         Ok(SQSListenerClient {
             inner: Some(inner),
@@ -48,6 +153,9 @@ impl<F: Fn(&Message) + Send + Sync> SQSListenerClientBuilder<F> {
     }
 }
 
+/// Listener for a `queue_url` with a handler function to be run on each received message
+///
+/// The handler function should take a [Message] and return a unit `()`
 #[derive(Debug)]
 pub struct SQSListener<F: Fn(&Message)> {
     /// Url for the SQS queue that you want to listen to
@@ -63,6 +171,10 @@ impl<F: Fn(&Message)> SQSListener<F> {
     }
 }
 
+/// Listener client, first build using [SQSListenerClientBuilder] and start by
+/// calling [`start()`](SQSListenerClient::start())
+///
+/// Can also be used to manually [`ack()`](SQSListenerClient::ack_message()) messages
 pub struct SQSListenerClient<F: Fn(&Message) + Sync + Send + 'static> {
     addr: Addr<client::SQSListenerClient<F>>,
     inner: Option<client::SQSListenerClient<F>>,
@@ -84,6 +196,11 @@ impl<F: Fn(&Message) + Sync + Send> SQSListenerClient<F> {
         self.addr.termination().await
     }
 
+    /// If you set `auto_ack` [Config](ConfigBuilder) option to false, you will need to manually
+    /// acknowledge messages. If you don't you will receive the same message over and over again.
+    ///
+    /// Use this function to manually acknowledge messages. If `auto_ack` is to true, you will not
+    /// need to use this function
     pub async fn ack_message(self, message: Message) -> Result<(), Error> {
         call!(self.addr.ack_message(message))
             .await
@@ -94,6 +211,7 @@ impl<F: Fn(&Message) + Sync + Send> SQSListenerClient<F> {
 }
 
 #[derive(Clone, Builder, Debug)]
+#[doc(hidden)]
 #[builder(pattern = "owned")]
 #[builder(build_fn(name = "build_private", private))]
 pub struct Config {
@@ -103,7 +221,7 @@ pub struct Config {
 
     #[builder(default = "true")]
     /// Determines if messages should be automatically acknowledges.
-    /// Defaults to true, if disabled you must manually ack the message by calling `sqs_listener_client.ack(message)`
+    /// Defaults to true, if disabled you must manually ack the message by calling [`sqs_listener_client.ack(message)`](SQSListenerClient::ack_message)
     auto_ack: bool,
 }
 

@@ -1,4 +1,6 @@
-use rusoto_core::{credential::ProvideAwsCredentials, DispatchSignedRequest, Region};
+#![doc(hidden)]
+/// Implementation details for SQSListenerClient, don't use directly.
+/// Instead use [SQSListenerClient](super::SQSListenerClient) and [SQSListenerClientBuilder](super::SQSListenerClientBuilder)
 use rusoto_sqs::{DeleteMessageRequest, Message, ReceiveMessageRequest, Sqs};
 
 use async_trait::async_trait;
@@ -13,42 +15,33 @@ use act_zero::*;
 use super::{Config, ConfigBuilder, Error, SQSListener};
 
 #[derive(Builder)]
-#[builder(build_fn(name = "build_private"))]
 #[builder(pattern = "owned")]
+#[doc(hidden)]
+#[builder(build_fn(private, name = "build_private"))]
 pub struct SQSListenerClient<F: Fn(&Message) + Send + Sync + 'static> {
-    #[builder(default = "Addr::detached()")]
+    #[builder(default = "Addr::detached()", setter(skip))]
     pub(crate) pid: Addr<SQSListenerClient<F>>,
+
     pub(crate) client: SqsClient,
 
     #[builder(default = "ConfigBuilder::default().build()")]
     pub(crate) config: Config,
 
-    #[builder(default = "Timer::default()")]
+    #[builder(default = "Timer::default()", setter(skip))]
     pub(crate) timer: Timer,
+
+    /// Add a listener to the [SQSListenerClient]
     pub(crate) listener: SQSListener<F>,
 }
 
 impl<F: Fn(&Message) + Send + Sync> SQSListenerClientBuilder<F> {
-    /// Create a new listener the default AWS client and queue_url
-    pub fn new(region: Region) -> Self {
-        Self::new_with_client(SqsClient::new(region))
+    // implementation detail
+    pub(crate) fn priv_build(self) -> Result<SQSListenerClient<F>, SQSListenerClientBuilderError> {
+        self.build_private()
     }
 
-    /// Create a new listener with custom credentials, request dispatcher, region and queue_url
-    pub fn new_with<P, D>(request_dispatcher: D, credentials_provider: P, region: Region) -> Self
-    where
-        P: ProvideAwsCredentials + Send + Sync + 'static,
-        D: DispatchSignedRequest + Send + Sync + 'static,
-    {
-        Self::new_with_client(SqsClient::new_with(
-            request_dispatcher,
-            credentials_provider,
-            region,
-        ))
-    }
-
-    /// Create new listener with a client and queue_url
-    pub fn new_with_client(client: SqsClient) -> Self {
+    // implementation, needs to be in this module because we are using Default with private fields
+    pub(crate) fn priv_new_with_client(client: SqsClient) -> Self {
         Self {
             client: Some(client),
             ..Default::default()
