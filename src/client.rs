@@ -10,7 +10,7 @@ use act_zero::runtimes::tokio::Timer;
 use act_zero::timer::Tick;
 use act_zero::*;
 
-use super::{Config, ConfigBuilder, SQSListener};
+use super::{Config, ConfigBuilder, Error, SQSListener};
 
 #[derive(Builder)]
 #[builder(build_fn(name = "build_private"))]
@@ -57,12 +57,12 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
 }
 
 impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
-    pub(crate) async fn ack_message(&self, message: Message) -> ActorResult<()> {
+    pub(crate) async fn ack_message(&self, message: Message) -> ActorResult<Result<(), Error>> {
         if message.receipt_handle.is_none() {
-            return Produces::ok(());
+            return Produces::ok(Err(Error::NoMessageHandle));
         }
 
-        let _ignore = self
+        let ignore = self
             .client
             .delete_message(DeleteMessageRequest {
                 queue_url: self.listener.queue_url.clone(),
@@ -70,7 +70,10 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
             })
             .await;
 
-        Produces::ok(())
+        match ignore {
+            Ok(_) => Produces::ok(Ok(())),
+            Err(error) => Produces::ok(Err(Error::AckMessage(error))),
+        }
     }
 }
 
@@ -110,7 +113,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
 }
 
 impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
-    async fn get_and_handle_messages(&self) -> eyre::Result<()> {
+    async fn get_and_handle_messages(&self) -> Result<(), Error> {
         debug!("get and handle messages called");
         let handler = &self.listener.handler;
 
@@ -122,11 +125,11 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
             })
             .await?
             .messages
-            .ok_or_else(|| eyre::eyre!("Unable to get message"))?;
+            .ok_or(Error::UnknownReceiveMessages)?;
 
         for message in messages {
-            // ignore result from handler
-            let _ = handler(&message);
+            // ignore result
+            handler(&message);
 
             // if auto ack is set ack message
             if self.config.auto_ack {

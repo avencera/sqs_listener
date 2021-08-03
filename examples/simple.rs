@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use sqs_listener::{Region, SQSListener, SQSListenerClientBuilder};
 
 #[tokio::main]

@@ -10,10 +10,30 @@ use derive_builder::Builder;
 pub use rusoto_core::credential::ProvideAwsCredentials;
 pub use rusoto_core::request::DispatchSignedRequest;
 pub use rusoto_core::Region;
+use rusoto_core::RusotoError;
 pub use rusoto_sqs::Message;
+use rusoto_sqs::{DeleteMessageError, ReceiveMessageError};
 
 pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
 pub type SQSListenerClientBuilderError = client::SQSListenerClientBuilderError;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("unable to receive messages: {0}")]
+    ReceiveMessages(#[from] RusotoError<ReceiveMessageError>),
+
+    #[error("unable to acknowledge message: {0}")]
+    AckMessage(#[from] RusotoError<DeleteMessageError>),
+
+    #[error("Message did not contain a message handle to use for acknowledging")]
+    NoMessageHandle,
+
+    #[error("Listener has stopped")]
+    ListenerStopped,
+
+    #[error("unable to receive messages")]
+    UnknownReceiveMessages,
+}
 
 impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
     pub fn build(
@@ -22,7 +42,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
         let inner: client::SQSListenerClient<F> = self.build_private()?;
 
         Ok(SQSListenerClient {
-            inner,
+            inner: Some(inner),
             addr: Addr::detached(),
         })
     }
@@ -45,30 +65,45 @@ impl<F: Fn(&Message)> SQSListener<F> {
 
 pub struct SQSListenerClient<F: Fn(&Message) + Sync + Send + 'static> {
     addr: Addr<client::SQSListenerClient<F>>,
-    inner: client::SQSListenerClient<F>,
+    inner: Option<client::SQSListenerClient<F>>,
+}
+
+impl<F: Fn(&Message) + Sync + Send + 'static> Clone for SQSListenerClient<F> {
+    fn clone(&self) -> Self {
+        Self {
+            addr: self.addr.clone(),
+            inner: None,
+        }
+    }
 }
 
 impl<F: Fn(&Message) + Sync + Send + 'static> SQSListenerClient<F> {
     /// Starts the service, this will run forever until your application exits.
     pub async fn start(mut self) {
-        self.addr = spawn_actor(self.inner);
+        self.addr = spawn_actor(self.inner.expect("impossible to not be set"));
         self.addr.termination().await
     }
 
-    pub async fn ack_message(self) {}
+    pub async fn ack_message(self, message: Message) -> Result<(), Error> {
+        call!(self.addr.ack_message(message))
+            .await
+            .map_err(|_err| Error::ListenerStopped)??;
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Builder, Debug)]
 #[builder(pattern = "owned")]
 #[builder(build_fn(name = "build_private", private))]
 pub struct Config {
-    #[builder(default = "Duration::from_secs(10_u64)")]
-    /// How often to check for new messages, defaults to 10 seconds
+    #[builder(default = "Duration::from_secs(5_u64)")]
+    /// How often to check for new messages, defaults to 5 seconds
     check_interval: Duration,
 
     #[builder(default = "true")]
-    /// Determines if messages should be automatically acknowledges. Defaults to true, if
-    /// disabled you must manually ack the message by calling `message.ack()`
+    /// Determines if messages should be automatically acknowledges.
+    /// Defaults to true, if disabled you must manually ack the message by calling `sqs_listener_client.ack(message)`
     auto_ack: bool,
 }
 
