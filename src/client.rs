@@ -106,7 +106,10 @@ impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
             self.timer
                 .set_timeout_for_strong(self.pid.clone(), self.config.check_interval);
 
-            let _ = self.get_and_handle_messages().await;
+            match self.get_and_handle_messages().await {
+                Ok(()) => {}
+                Err(error) => error!("Error when handling message: {:?}", error),
+            }
         }
         Produces::ok(())
     }

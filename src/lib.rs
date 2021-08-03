@@ -1,18 +1,16 @@
 mod client;
 
-use std::time::Duration;
-
 use act_zero::runtimes::tokio::spawn_actor;
 use act_zero::*;
-
 use derive_builder::Builder;
+use rusoto_core::RusotoError;
+use rusoto_sqs::{DeleteMessageError, ReceiveMessageError};
+use std::time::Duration;
 
 pub use rusoto_core::credential::ProvideAwsCredentials;
 pub use rusoto_core::request::DispatchSignedRequest;
 pub use rusoto_core::Region;
-use rusoto_core::RusotoError;
 pub use rusoto_sqs::Message;
-use rusoto_sqs::{DeleteMessageError, ReceiveMessageError};
 
 pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
 pub type SQSListenerClientBuilderError = client::SQSListenerClientBuilderError;
