@@ -7,9 +7,11 @@ use rusoto_core::RusotoError;
 use rusoto_sqs::{DeleteMessageError, ReceiveMessageError};
 use std::time::Duration;
 
-pub use rusoto_core::credential::ProvideAwsCredentials;
-pub use rusoto_core::request::DispatchSignedRequest;
-pub use rusoto_core::Region;
+pub use rusoto_core::{
+    credential,
+    region::{self, Region},
+    request,
+};
 pub use rusoto_sqs::Message;
 
 pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
