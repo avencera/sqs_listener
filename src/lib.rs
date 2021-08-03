@@ -21,44 +21,28 @@ pub use rusoto_sqs::{
 #[derive(Debug, Clone)]
 pub struct HandlerError;
 
-pub struct SQSListenerClient<T: Send + Sync + 'static> {
+pub struct SQSListenerClient<F: Fn(&Message) + Send + Sync + 'static> {
     pid: Addr<Self>,
     client: SqsClient,
     config: Config,
 
     timer: Timer,
-    listeners: Vec<SQSListener<T>>,
+    listener: Option<SQSListener<F>>,
 }
 
-type HandlerFn<T> = fn(&Message, &Context<T>) -> Result<(), HandlerError>;
-
-pub struct SQSListener<T: Send + Sync + 'static> {
-    context: Context<T>,
-    queue_url: String,
-    handler: HandlerFn<T>,
+pub struct SQSListener<F: Fn(&Message)> {
+    pub queue_url: String,
+    pub handler: F,
 }
 
-struct Context<T> {
-    inner: T,
-}
-
-impl<T> Context<T> {
-    fn get(self) -> T {
-        self.inner
-    }
-}
-
-impl<T: Send + Sync + 'static> SQSListener<T> {
-    fn new(queue_url: String, handler: HandlerFn<T>, context: Context<T>) -> Self {
-        Self {
-            context,
-            queue_url,
-            handler,
-        }
+impl<F: Fn(&Message)> SQSListener<F> {
+    fn new(queue_url: String, handler: F) -> Self {
+        Self { queue_url, handler }
     }
 }
 
 #[derive(Clone, Builder)]
+#[builder(build_fn(name = "build_private", private))]
 pub struct Config {
     #[builder(default = "Duration::from_secs(10_u64)")]
     /// How often to check for new messages, defaults to 10 seconds
@@ -70,8 +54,15 @@ pub struct Config {
     auto_ack: bool,
 }
 
+impl ConfigBuilder {
+    pub fn build(self) -> Config {
+        self.build_private()
+            .expect("will always work because all fields have defaults")
+    }
+}
+
 #[async_trait]
-impl<T: Send + Sync + 'static> Actor for SQSListenerClient<T> {
+impl<F: Fn(&Message) + Send + Sync + 'static> Actor for SQSListenerClient<F> {
     async fn started(&mut self, pid: Addr<Self>) -> ActorResult<()> {
         let pid_clone = pid.clone();
         // send!(pid_clone.listen(pid));
@@ -94,19 +85,19 @@ impl<T: Send + Sync + 'static> Actor for SQSListenerClient<T> {
 }
 
 #[async_trait]
-impl<T: Send + Sync + 'static> Tick for SQSListenerClient<T> {
+impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
     async fn tick(&mut self) -> ActorResult<()> {
         if self.timer.tick() {
             self.timer
                 .set_timeout_for_strong(self.pid.clone(), self.config.check_interval);
 
-            // let _ = self.send_heartbeat().await;
+            let _ = self.get_and_handle_messages().await;
         }
         Produces::ok(())
     }
 }
 
-impl<T: Send + Sync + 'static> SQSListenerClient<T> {
+impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
     /// returns the SqsClient
     pub fn client(self) -> SqsClient {
         self.client
@@ -141,33 +132,33 @@ impl<T: Send + Sync + 'static> SQSListenerClient<T> {
             pid: Addr::detached(),
             config,
             client,
-            listeners: vec![],
+            listener: None,
         }
     }
 
     /// Adds a listener
-    pub fn add_listener(mut self, listener: SQSListener<T>) -> Self {
-        self.listeners.push(listener);
+    pub fn set_listener(mut self, listener: SQSListener<F>) -> Self {
+        self.listener = Some(listener);
         self
     }
 
     async fn get_and_handle_messages(&self) -> eyre::Result<()> {
-        for listener in &self.listeners {
-            let messages = self
-                .client
-                .receive_message(ReceiveMessageRequest {
-                    queue_url: listener.queue_url.clone(),
-                    ..Default::default()
-                })
-                .await?
-                .messages
-                .ok_or_else(|| eyre::eyre!("Unable to get message"))?;
+        let handler = &self.listener.as_ref().unwrap().handler;
 
-            for message in messages {
-                let handler = listener.handler;
-                let _ = handler(&message, &listener.context);
-            }
-        }
+        // let messages = self
+        //     .client
+        //     .receive_message(ReceiveMessageRequest {
+        //         queue_url: self.listener.queue_url.clone(),
+        //         ..Default::default()
+        //     })
+        //     .await?
+        //     .messages
+        //     .ok_or_else(|| eyre::eyre!("Unable to get message"))?;
+
+        // for message in messages {
+        //     let handler = self.listener.handler;
+        //     let _ = handler(&message, &self.listener.context);
+        // }
 
         Ok(())
     }
@@ -189,8 +180,22 @@ impl<T: Send + Sync + 'static> SQSListenerClient<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn creates_with_closure() {
+        let hashmap: HashMap<String, String> = HashMap::new();
+
+        let listener = SQSListener {
+            queue_url: "".to_string(),
+            handler: move |message| {
+                println!("HashMap: {:#?}", hashmap);
+                println!("{:#?}", message)
+            },
+        };
+
+        let _client = SQSListenerClient::new(Region::UsEast1, ConfigBuilder::default().build())
+            .set_listener(listener);
     }
 }

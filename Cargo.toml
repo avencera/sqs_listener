@@ -30,3 +30,10 @@ derive_builder = "0.10"
 # aws sqs
 rusoto_core = "0.47.0"
 rusoto_sqs = "0.47.0"
+
+# for examples
+[dev-dependencies]
+color-eyre = "0.5"
+env_logger = "0.9"
+eyre = "0.6"
+tokio = {version = "1.1", features = ["rt-multi-thread", "macros", "sync"]}
