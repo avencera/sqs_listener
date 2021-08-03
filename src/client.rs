@@ -28,7 +28,7 @@ pub struct SQSListenerClient<F: Fn(&Message) + Send + Sync + 'static> {
     pub(crate) listener: SQSListener<F>,
 }
 
-impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
+impl<F: Fn(&Message) + Send + Sync> SQSListenerClientBuilder<F> {
     /// Create a new listener the default AWS client and queue_url
     pub fn new(region: Region) -> Self {
         Self::new_with_client(SqsClient::new(region))
@@ -56,7 +56,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
     }
 }
 
-impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
+impl<F: Fn(&Message) + Send + Sync> SQSListenerClient<F> {
     pub(crate) async fn ack_message(&self, message: Message) -> ActorResult<Result<(), Error>> {
         if message.receipt_handle.is_none() {
             return Produces::ok(Err(Error::NoMessageHandle));
@@ -78,7 +78,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
 }
 
 #[async_trait]
-impl<F: Fn(&Message) + Send + Sync + 'static> Actor for SQSListenerClient<F> {
+impl<F: Fn(&Message) + Send + Sync> Actor for SQSListenerClient<F> {
     async fn started(&mut self, pid: Addr<Self>) -> ActorResult<()> {
         info!("SQSListenerClient started...");
 
@@ -100,7 +100,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> Actor for SQSListenerClient<F> {
 }
 
 #[async_trait]
-impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
+impl<F: Fn(&Message) + Send + Sync> Tick for SQSListenerClient<F> {
     async fn tick(&mut self) -> ActorResult<()> {
         if self.timer.tick() {
             self.timer
@@ -115,7 +115,7 @@ impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
     }
 }
 
-impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
+impl<F: Fn(&Message) + Send + Sync> SQSListenerClient<F> {
     async fn get_and_handle_messages(&self) -> Result<(), Error> {
         debug!("get and handle messages called");
         let handler = &self.listener.handler;

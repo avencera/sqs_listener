@@ -35,7 +35,7 @@ pub enum Error {
     UnknownReceiveMessages,
 }
 
-impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
+impl<F: Fn(&Message) + Send + Sync> SQSListenerClientBuilder<F> {
     pub fn build(
         self: SQSListenerClientBuilder<F>,
     ) -> Result<SQSListenerClient<F>, SQSListenerClientBuilderError> {
@@ -68,7 +68,7 @@ pub struct SQSListenerClient<F: Fn(&Message) + Sync + Send + 'static> {
     inner: Option<client::SQSListenerClient<F>>,
 }
 
-impl<F: Fn(&Message) + Sync + Send + 'static> Clone for SQSListenerClient<F> {
+impl<F: Fn(&Message) + Sync + Send> Clone for SQSListenerClient<F> {
     fn clone(&self) -> Self {
         Self {
             addr: self.addr.clone(),
@@ -77,7 +77,7 @@ impl<F: Fn(&Message) + Sync + Send + 'static> Clone for SQSListenerClient<F> {
     }
 }
 
-impl<F: Fn(&Message) + Sync + Send + 'static> SQSListenerClient<F> {
+impl<F: Fn(&Message) + Sync + Send> SQSListenerClient<F> {
     /// Starts the service, this will run forever until your application exits.
     pub async fn start(mut self) {
         self.addr = spawn_actor(self.inner.expect("impossible to not be set"));
