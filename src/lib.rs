@@ -1,47 +1,65 @@
+mod client;
+
 use std::time::Duration;
 
-use log::error;
-use rusoto_core::RusotoError;
-use rusoto_sqs::{Sqs, SqsClient};
-
-use act_zero::runtimes::tokio::Timer;
-use act_zero::timer::Tick;
+use act_zero::runtimes::tokio::spawn_actor;
 use act_zero::*;
 
-use async_trait::async_trait;
 use derive_builder::Builder;
 
 pub use rusoto_core::credential::ProvideAwsCredentials;
 pub use rusoto_core::request::DispatchSignedRequest;
 pub use rusoto_core::Region;
-pub use rusoto_sqs::{
-    DeleteMessageRequest, Message, ReceiveMessageError, ReceiveMessageRequest, ReceiveMessageResult,
-};
+pub use rusoto_sqs::Message;
 
-#[derive(Debug, Clone)]
-pub struct HandlerError;
+pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
+pub type SQSListenerClientBuilderError = client::SQSListenerClientBuilderError;
 
-pub struct SQSListenerClient<F: Fn(&Message) + Send + Sync + 'static> {
-    pid: Addr<Self>,
-    client: SqsClient,
-    config: Config,
+impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClientBuilder<F> {
+    pub fn build(
+        self: SQSListenerClientBuilder<F>,
+    ) -> Result<SQSListenerClient<F>, SQSListenerClientBuilderError> {
+        let inner: client::SQSListenerClient<F> = self.build_private()?;
 
-    timer: Timer,
-    listener: Option<SQSListener<F>>,
+        Ok(SQSListenerClient {
+            inner,
+            addr: Addr::detached(),
+        })
+    }
 }
 
+#[derive(Debug)]
 pub struct SQSListener<F: Fn(&Message)> {
-    pub queue_url: String,
-    pub handler: F,
+    /// Url for the SQS queue that you want to listen to
+    queue_url: String,
+
+    /// Function to call when a new message is received
+    handler: F,
 }
 
 impl<F: Fn(&Message)> SQSListener<F> {
-    fn new(queue_url: String, handler: F) -> Self {
+    pub fn new(queue_url: String, handler: F) -> Self {
         Self { queue_url, handler }
     }
 }
 
-#[derive(Clone, Builder)]
+pub struct SQSListenerClient<F: Fn(&Message) + Sync + Send + 'static> {
+    addr: Addr<client::SQSListenerClient<F>>,
+    inner: client::SQSListenerClient<F>,
+}
+
+impl<F: Fn(&Message) + Sync + Send + 'static> SQSListenerClient<F> {
+    /// Starts the service, this will run forever until your application exits.
+    pub async fn start(mut self) {
+        self.addr = spawn_actor(self.inner);
+        self.addr.termination().await
+    }
+
+    pub async fn ack_message(self) {}
+}
+
+#[derive(Clone, Builder, Debug)]
+#[builder(pattern = "owned")]
 #[builder(build_fn(name = "build_private", private))]
 pub struct Config {
     #[builder(default = "Duration::from_secs(10_u64)")]
@@ -61,123 +79,6 @@ impl ConfigBuilder {
     }
 }
 
-#[async_trait]
-impl<F: Fn(&Message) + Send + Sync + 'static> Actor for SQSListenerClient<F> {
-    async fn started(&mut self, pid: Addr<Self>) -> ActorResult<()> {
-        let pid_clone = pid.clone();
-        // send!(pid_clone.listen(pid));
-
-        // Start the timer
-        self.timer
-            .set_timeout_for_strong(pid_clone.clone(), self.config.check_interval);
-
-        self.pid = pid_clone;
-
-        Produces::ok(())
-    }
-
-    async fn error(&mut self, error: ActorError) -> bool {
-        error!("SQSListener Actor Error: {:?}", error);
-
-        // do not stop on actor error
-        false
-    }
-}
-
-#[async_trait]
-impl<F: Fn(&Message) + Send + Sync + 'static> Tick for SQSListenerClient<F> {
-    async fn tick(&mut self) -> ActorResult<()> {
-        if self.timer.tick() {
-            self.timer
-                .set_timeout_for_strong(self.pid.clone(), self.config.check_interval);
-
-            let _ = self.get_and_handle_messages().await;
-        }
-        Produces::ok(())
-    }
-}
-
-impl<F: Fn(&Message) + Send + Sync + 'static> SQSListenerClient<F> {
-    /// returns the SqsClient
-    pub fn client(self) -> SqsClient {
-        self.client
-    }
-
-    /// Create a new listener the default AWS client and queue_url
-    pub fn new(region: Region, config: Config) -> Self {
-        Self::new_with_client(SqsClient::new(region), config)
-    }
-
-    /// Create a new listener with custom credentials, request dispatcher, region and queue_url
-    pub fn new_with<P, D>(
-        request_dispatcher: D,
-        credentials_provider: P,
-        region: Region,
-        config: Config,
-    ) -> Self
-    where
-        P: ProvideAwsCredentials + Send + Sync + 'static,
-        D: DispatchSignedRequest + Send + Sync + 'static,
-    {
-        Self::new_with_client(
-            SqsClient::new_with(request_dispatcher, credentials_provider, region),
-            config,
-        )
-    }
-
-    /// Create new listener with a client and queue_url
-    pub fn new_with_client(client: SqsClient, config: Config) -> Self {
-        Self {
-            timer: Timer::default(),
-            pid: Addr::detached(),
-            config,
-            client,
-            listener: None,
-        }
-    }
-
-    /// Adds a listener
-    pub fn set_listener(mut self, listener: SQSListener<F>) -> Self {
-        self.listener = Some(listener);
-        self
-    }
-
-    async fn get_and_handle_messages(&self) -> eyre::Result<()> {
-        let handler = &self.listener.as_ref().unwrap().handler;
-
-        // let messages = self
-        //     .client
-        //     .receive_message(ReceiveMessageRequest {
-        //         queue_url: self.listener.queue_url.clone(),
-        //         ..Default::default()
-        //     })
-        //     .await?
-        //     .messages
-        //     .ok_or_else(|| eyre::eyre!("Unable to get message"))?;
-
-        // for message in messages {
-        //     let handler = self.listener.handler;
-        //     let _ = handler(&message, &self.listener.context);
-        // }
-
-        Ok(())
-    }
-
-    // fn ack_message(&self, message: &Message) {
-    //     if message.receipt_handle.is_none() {
-    //         return;
-    //     }
-
-    //     let _ignore = self
-    //         .sqs_client
-    //         .delete_message(DeleteMessageRequest {
-    //             queue_url: self.queue_url.clone(),
-    //             receipt_handle: message.receipt_handle.clone().unwrap(),
-    //         })
-    //         .sync();
-    // }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,15 +88,37 @@ mod tests {
     fn creates_with_closure() {
         let hashmap: HashMap<String, String> = HashMap::new();
 
-        let listener = SQSListener {
-            queue_url: "".to_string(),
-            handler: move |message| {
-                println!("HashMap: {:#?}", hashmap);
-                println!("{:#?}", message)
-            },
-        };
+        let listener = SQSListener::new("".to_string(), move |message| {
+            println!("HashMap: {:#?}", hashmap);
+            println!("{:#?}", message)
+        });
 
-        let _client = SQSListenerClient::new(Region::UsEast1, ConfigBuilder::default().build())
-            .set_listener(listener);
+        let client = SQSListenerClientBuilder::new(Region::UsEast1)
+            .listener(listener)
+            .build();
+
+        assert!(client.is_ok())
+    }
+
+    #[test]
+    fn creates_with_config() {
+        let hashmap: HashMap<String, String> = HashMap::new();
+
+        let listener = SQSListener::new("".to_string(), move |message| {
+            println!("HashMap: {:#?}", hashmap);
+            println!("{:#?}", message)
+        });
+
+        let config = ConfigBuilder::default()
+            .check_interval(Duration::from_millis(1000))
+            .auto_ack(false)
+            .build();
+
+        let client = SQSListenerClientBuilder::new(Region::UsEast1)
+            .listener(listener)
+            .config(config)
+            .build();
+
+        assert!(client.is_ok())
     }
 }

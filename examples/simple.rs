@@ -1,30 +1,21 @@
 use std::collections::HashMap;
 
-use act_zero::runtimes::tokio::spawn_actor;
-use act_zero::*;
-use sqs_listener::{ConfigBuilder, Region, SQSListener, SQSListenerClient};
+use sqs_listener::{Region, SQSListener, SQSListenerClientBuilder};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     env_logger::init();
     color_eyre::install()?;
 
-    let hashmap: HashMap<String, String> = HashMap::new();
+    let listener = SQSListener::new("".to_string(), |message| {
+        println!("Message received {:#?}", message)
+    });
 
-    let listener = SQSListener {
-        queue_url: "".to_string(),
-        handler: move |message| {
-            println!("HashMap: {:#?}", hashmap);
-            println!("{:#?}", message)
-        },
-    };
+    let client = SQSListenerClientBuilder::new(Region::UsEast1)
+        .listener(listener)
+        .build()?;
 
-    let client = SQSListenerClient::new(Region::UsEast1, ConfigBuilder::default().build().unwrap())
-        .set_listener(listener);
-
-    let addr = spawn_actor(client);
-
-    addr.termination().await;
+    let _ = client.start().await;
 
     Ok(())
 }
