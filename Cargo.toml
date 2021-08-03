@@ -1,6 +1,12 @@
 [package]
+authors = ["Praveen Perera <praveen@avencera.com>"]
+description = "An easy to use listener, to listen for messages from SQS queues"
+documentation = "https://docs.rs/sqs_listener"
 edition = "2018"
+homepage = "https://github.com/avencera/sqs_listener"
+license = "Apache-2.0"
 name = "sqs_listener"
+repository = "https://github.com/avencera/sqs_listener"
 version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
