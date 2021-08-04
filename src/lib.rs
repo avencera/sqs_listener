@@ -4,7 +4,7 @@
 
 Simple example: [examples/simple.rs](https://github.com/avencera/sqs_listener/blob/master/examples/simple.rs)
 
-```rust
+```rust,ignore
 use sqs_listener::{Region, SQSListener, SQSListenerClientBuilder};
 
 #[tokio::main]
@@ -30,7 +30,7 @@ async fn main() -> eyre::Result<()> {
 
 Example with creds: [examples/with_creds.rs](https://github.com/avencera/sqs_listener/blob/master/examples/with_creds.rs)
 
-```rust
+```rust,ignore
 use std::env;
 
 use sqs_listener::{
