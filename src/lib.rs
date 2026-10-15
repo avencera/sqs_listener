@@ -94,17 +94,16 @@ pub type SQSListenerClientBuilder<F> = client::SQSListenerClientBuilder<F>;
 ///     ValidationError(String),
 /// }
 /// ```
-
 pub type SQSListenerClientBuilderError = client::SQSListenerClientBuilderError;
 
 /// Error type for sqs_listener
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("unable to receive messages: {0}")]
-    ReceiveMessages(#[from] RusotoError<ReceiveMessageError>),
+    ReceiveMessages(#[source] Box<RusotoError<ReceiveMessageError>>),
 
     #[error("unable to acknowledge message: {0}")]
-    AckMessage(#[from] RusotoError<DeleteMessageError>),
+    AckMessage(#[source] Box<RusotoError<DeleteMessageError>>),
 
     #[error("Message did not contain a message handle to use for acknowledging")]
     NoMessageHandle,
@@ -114,6 +113,20 @@ pub enum Error {
 
     #[error("unable to receive messages")]
     UnknownReceiveMessages,
+}
+
+// the rusoto errors are large, so they are boxed to keep `Error` (and every
+// `Result` carrying it) small
+impl From<RusotoError<ReceiveMessageError>> for Error {
+    fn from(error: RusotoError<ReceiveMessageError>) -> Self {
+        Error::ReceiveMessages(Box::new(error))
+    }
+}
+
+impl From<RusotoError<DeleteMessageError>> for Error {
+    fn from(error: RusotoError<DeleteMessageError>) -> Self {
+        Error::AckMessage(Box::new(error))
+    }
 }
 
 /// Create a new Builder
