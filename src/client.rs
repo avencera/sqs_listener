@@ -65,7 +65,7 @@ impl<F: Fn(&Message) + Send + Sync> SQSListenerClient<F> {
 
         match ignore {
             Ok(_) => Produces::ok(Ok(())),
-            Err(error) => Produces::ok(Err(Error::AckMessage(error))),
+            Err(error) => Produces::ok(Err(error.into())),
         }
     }
 }
